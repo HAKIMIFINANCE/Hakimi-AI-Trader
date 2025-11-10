@@ -4,7 +4,7 @@ Final project for the **Building AI** course by Reaktor x University of Helsinki
 
 ---
 
-## 🧠 Summary
+##Summary
 Hakimi-AI-Trader is a **multi-timeframe AI-powered trading system** designed to predict market direction and trend strength across crypto, forex, and commodities markets.  
 It uses deep learning models, multi-timeframe data fusion, and advanced feature engineering to identify high-probability setups with smart risk control.
 

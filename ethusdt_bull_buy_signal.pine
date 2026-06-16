@@ -1,0 +1,118 @@
+//@version=5
+indicator("ETHUSDT Bullish Buy Signals (45m)", overlay=true, max_labels_count=500)
+
+// === Inputs ===
+trendTimeframe4h = "240"
+trendTimeframe2h = "120"
+trendTimeframe1h = "60"
+entryTimeframe = "45"
+
+emaFastLen = input.int(50, "EMA Fast Length", minval=1)
+emaSlowLen = input.int(200, "EMA Slow Length", minval=1)
+emaPullbackFastLen = input.int(20, "Pullback EMA Fast", minval=1)
+emaPullbackSlowLen = input.int(50, "Pullback EMA Slow", minval=1)
+
+rsiLen = input.int(14, "RSI Length", minval=1)
+rsiMin = input.float(50.0, "RSI Min", step=0.1)
+rsiMax = input.float(65.0, "RSI Max", step=0.1)
+
+volMaLen = input.int(20, "Volume MA Length", minval=1)
+rangeMaLen = input.int(20, "Range MA Length", minval=1)
+
+supportLookback = input.int(50, "Support Lookback (1H)", minval=5)
+resistanceLookback = input.int(50, "Resistance Lookback (4H)", minval=5)
+supportBufferPct = input.float(0.4, "Support Buffer (%)", step=0.1) / 100.0
+resistanceBufferPct = input.float(0.5, "Resistance Buffer (%)", step=0.1) / 100.0
+
+// === Helper for request.security with no repaint ===
+sec(sym, tf, expr) => request.security(sym, tf, expr, barmerge.gaps_off, barmerge.lookahead_off)
+
+// === Higher timeframe trend filters ===
+close4h = sec(syminfo.tickerid, trendTimeframe4h, close)
+ema50_4h = sec(syminfo.tickerid, trendTimeframe4h, ta.ema(close, emaFastLen))
+ema200_4h = sec(syminfo.tickerid, trendTimeframe4h, ta.ema(close, emaSlowLen))
+
+close2h = sec(syminfo.tickerid, trendTimeframe2h, close)
+ema50_2h = sec(syminfo.tickerid, trendTimeframe2h, ta.ema(close, emaFastLen))
+ema200_2h = sec(syminfo.tickerid, trendTimeframe2h, ta.ema(close, emaSlowLen))
+
+close1h = sec(syminfo.tickerid, trendTimeframe1h, close)
+ema50_1h = sec(syminfo.tickerid, trendTimeframe1h, ta.ema(close, emaFastLen))
+ema200_1h = sec(syminfo.tickerid, trendTimeframe1h, ta.ema(close, emaSlowLen))
+
+trendBull4h = close4h > ema200_4h and ema50_4h > ema200_4h
+trendBull2h = close2h > ema200_2h and ema50_2h > ema200_2h
+trendBull1h = close1h > ema200_1h and ema50_1h > ema200_1h
+
+trendBullish = trendBull4h and trendBull2h and trendBull1h
+
+// === Higher timeframe structure filters ===
+// Support zone (1H) and resistance zone (4H)
+support1h = sec(syminfo.tickerid, trendTimeframe1h, ta.lowest(low, supportLookback))
+resistance4h = sec(syminfo.tickerid, trendTimeframe4h, ta.highest(high, resistanceLookback))
+
+holdingAboveSupport = close1h > support1h * (1.0 + supportBufferPct)
+nearResistance = close1h > resistance4h * (1.0 - resistanceBufferPct)
+
+// Higher-low preference via rising short-term low averages on 1H
+lowAvgShort1h = sec(syminfo.tickerid, trendTimeframe1h, ta.sma(low, 3))
+lowAvgLong1h = sec(syminfo.tickerid, trendTimeframe1h, ta.sma(low, 8))
+rangeContinuation = lowAvgShort1h > lowAvgLong1h
+
+structureOk = holdingAboveSupport and not nearResistance and rangeContinuation
+
+// === Entry timeframe (45m) conditions ===
+close45 = sec(syminfo.tickerid, entryTimeframe, close)
+open45 = sec(syminfo.tickerid, entryTimeframe, open)
+high45 = sec(syminfo.tickerid, entryTimeframe, high)
+low45 = sec(syminfo.tickerid, entryTimeframe, low)
+volume45 = sec(syminfo.tickerid, entryTimeframe, volume)
+
+ema20_45 = sec(syminfo.tickerid, entryTimeframe, ta.ema(close, emaPullbackFastLen))
+ema50_45 = sec(syminfo.tickerid, entryTimeframe, ta.ema(close, emaPullbackSlowLen))
+ema200_45 = sec(syminfo.tickerid, entryTimeframe, ta.ema(close, emaSlowLen))
+
+rsi45 = sec(syminfo.tickerid, entryTimeframe, ta.rsi(close, rsiLen))
+volMa45 = sec(syminfo.tickerid, entryTimeframe, ta.sma(volume, volMaLen))
+range45 = high45 - low45
+rangeMa45 = sec(syminfo.tickerid, entryTimeframe, ta.sma(high - low, rangeMaLen))
+
+pullbackToEma = low45 <= ema20_45 or low45 <= ema50_45
+rsiOk = rsi45 >= rsiMin and rsi45 <= rsiMax
+noOverbought = rsi45 <= 70
+volumeOk = volume45 > volMa45
+rangeOk = range45 > rangeMa45
+aboveEntryEma200 = close45 > ema200_45
+
+// Bullish confirmation candle:
+// 1) Bullish engulfing (current bullish body engulfs previous bearish body)
+prevOpen45 = sec(syminfo.tickerid, entryTimeframe, open[1])
+prevClose45 = sec(syminfo.tickerid, entryTimeframe, close[1])
+
+bullishEngulfing = close45 > open45 and prevClose45 < prevOpen45 and close45 >= prevOpen45 and open45 <= prevClose45
+
+// 2) Strong bullish close near high
+strongBullClose = close45 > open45 and close45 >= high45 - (range45 * 0.2)
+
+bullishConfirm = bullishEngulfing or strongBullClose
+
+entryFilters = pullbackToEma and rsiOk and noOverbought and volumeOk and rangeOk and aboveEntryEma200 and bullishConfirm
+
+// Ensure signals only print on confirmed 45m bars
+confirmed45 = sec(syminfo.tickerid, entryTimeframe, barstate.isconfirmed)
+
+buySignal = trendBullish and structureOk and entryFilters and confirmed45
+
+// === Plot BUY labels only ===
+plotshape(
+     buySignal,
+     title="BUY Signal",
+     style=shape.labelup,
+     location=location.belowbar,
+     color=color.new(color.green, 0),
+     text="BUY",
+     textcolor=color.white,
+     size=size.tiny
+ )
+
+// === End of script ===
